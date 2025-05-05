@@ -21,19 +21,46 @@ import json
 import random
 import time
 from pathlib import Path
+import argparse
 
 import streamlit as st
 
-DATA_FILE = Path(__file__).with_name("characters.json")
+DATA_FILE = Path(__file__).with_name("characters_by_chapter.json")
 BRIGHT_GREEN = "#00c853"
 BRIGHT_RED = "#ff1744"
+char_color = "#FFFFFF"
 
+def parse_args() -> dict[str,str]:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--chapters", nargs="+", type=int, help="Chapter numbers to review")
+    cli_args, _ = parser.parse_known_args()
+    return cli_args
 
-# ---------- Load deck ----------
+def build_deck(data: dict, selected: list[str]):
+    deck = []
+    for ch in selected:
+        deck.extend(data[ch])
+    random.shuffle(deck)
+    return deck
+
 @st.cache_data
 def load_deck(path: Path):
     with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    all_chapters = sorted(data.keys(), key=lambda k: int(k.replace("chapter", "")))
+    cli_args = parse_args()
+
+    if cli_args.chapters:
+        selected_chapters = [f"chapter{n}" for n in cli_args.chapters if f"chapter{n}" in data]
+        if not selected_chapters:
+            return build_deck(data,all_chapters)
+        else:
+            return build_deck(data, selected_chapters)
+
+    else:
+        return build_deck(data,all_chapters)
+
+
 
 
 def normalize(ans: str) -> str:
@@ -55,24 +82,25 @@ feedback = st.empty()
 def render(char: str, color: str):
     with box.container():
         st.markdown(BOX_TEMPLATE.format(char=char, color=color), unsafe_allow_html=True)
-# ---------- Callbacks ----------
+
     with feedback.container():
         st.write(st.session_state.feedback)
+
 def evaluate_answer():
     card = st.session_state.deck[st.session_state.idx]
-    correct_en = card["english"]
-    given = st.session_state.answer
+    answer_norm = normalize(st.session_state.answer)
+    meaning_norms = [normalize(m) for m in card["english"]]
+    is_correct = answer_norm in meaning_norms
 
     st.session_state.response_checked = True
     st.session_state.timer_start = time.time()
-    st.session_state.correct = normalize(given) == normalize(correct_en)
+    st.session_state.correct = is_correct
 
     if st.session_state.correct:
         st.session_state.score += 1
-        st.session_state.feedback = "✅ Correct!"
+        st.session_state.feedback = f"✅ Correct! {', '.join(card['english'])}"
     else:
-        st.session_state.feedback = f"❌ Wrong. Correct: {correct_en}"
-
+        st.session_state.feedback = f"❌ Wrong. Correct: {','.join(card['english'])}"
 
     char_color = BRIGHT_GREEN if st.session_state.correct else BRIGHT_RED
     render(card["hanzi"], char_color)
@@ -80,6 +108,7 @@ def evaluate_answer():
         time.sleep(1.4)
     else:
         time.sleep(1.4)
+
 def advance_card():
     st.session_state.idx += 1
     st.session_state.answer = ""
@@ -106,7 +135,6 @@ if st.session_state.response_checked and "timer_start" in st.session_state:
     if elapsed >= 1:
         advance_card()
     else:
-        # brief pause then rerun so timer keeps counting without blocking long
         time.sleep(0.1)
         st.rerun()
 
@@ -129,10 +157,8 @@ if st.session_state.idx >= len(st.session_state.deck):
 
 card = st.session_state.deck[st.session_state.idx]
 
-# ---------- Determine color ----------
-char_color = "#000"  # default black
 
-# ---------- Display Hanzi ----------
+
 def display_hanzi(char_color):
     st.markdown(
         f"""<div style='text-align:center; font-size: 200px; line-height:1; color:{char_color};'>
@@ -142,8 +168,10 @@ def display_hanzi(char_color):
     )
 if not st.session_state.response_checked:
     card = st.session_state.deck[st.session_state.idx]
-    render(card["hanzi"], "#FFFFFF")
-
+    try:
+        render(card["hanzi"], "#FFFFFF")
+    except:
+        st.write(card)
 # ---------- Input ----------
 st.text_input(
     "English meaning:",
